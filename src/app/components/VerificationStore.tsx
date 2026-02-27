@@ -26,6 +26,7 @@ export interface OcrResult {
   confidence: number;
   institutionFound?: string;
   institutionMatch?: boolean;
+  errorDetail?: string;
 }
 
 export interface Verification {

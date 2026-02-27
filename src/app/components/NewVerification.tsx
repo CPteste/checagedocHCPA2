@@ -85,11 +85,15 @@ export function NewVerification() {
         confidence = result.confidence;
       } catch (tesseractError) {
         console.error("Tesseract.js falhou:", tesseractError);
+        const errorMsg = tesseractError instanceof Error ? tesseractError.message : String(tesseractError);
+        console.error("[OCR] Erro detalhado:", errorMsg);
+        console.error("[OCR] Stack:", tesseractError instanceof Error ? tesseractError.stack : "N/A");
         setOcrResult({
           text: "",
           confidence: 0,
           institutionMatch: false,
           institutionFound: undefined,
+          errorDetail: errorMsg,
         });
         setLoadingOcr(false);
         setOcrProgress(null);
@@ -442,6 +446,13 @@ export function NewVerification() {
                     <li>A imagem está muito escura ou com baixa resolução</li>
                     <li>Erro ao carregar o modelo de idioma</li>
                   </ul>
+                  {ocrResult.errorDetail && (
+                    <div className="mt-3 p-2 bg-yellow-100 rounded border border-yellow-300">
+                      <p className="text-[11px] font-mono break-all">
+                        <strong>Erro técnico:</strong> {ocrResult.errorDetail}
+                      </p>
+                    </div>
+                  )}
                   <p className="mt-2">Tente novamente com uma <strong>imagem nítida</strong> do comprovante.</p>
                 </div>
               </div>

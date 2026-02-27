@@ -241,22 +241,27 @@ export async function runTesseractOcr(
   file: File,
   onProgress?: (status: string, progress: number) => void
 ): Promise<{ text: string; confidence: number }> {
-  const Tesseract = await import("tesseract.js");
+  // Only accept images
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Apenas imagens (JPG, PNG) são suportadas pelo OCR. Converta o PDF em imagem primeiro.");
+  }
 
-  // Create image source
-  const imageSource = file.type.startsWith("image/")
-    ? URL.createObjectURL(file)
-    : file;
+  const imageUrl = URL.createObjectURL(file);
 
   try {
     onProgress?.("Carregando motor OCR...", 0);
 
-    const result = await Tesseract.recognize(imageSource, "por", {
+    const Tesseract = await import("tesseract.js");
+
+    // Use the convenience recognize() function (available in v5-v7)
+    // It internally creates a worker, runs OCR, and terminates
+    const result = await Tesseract.recognize(imageUrl, "por", {
       logger: (m: { status: string; progress: number }) => {
         const statusMap: Record<string, string> = {
           "loading tesseract core": "Carregando Tesseract...",
           "initializing tesseract": "Inicializando...",
           "loading language traineddata": "Baixando modelo português...",
+          "loaded language traineddata": "Modelo carregado!",
           "initializing api": "Preparando API...",
           "recognizing text": "Reconhecendo texto...",
         };
@@ -265,14 +270,16 @@ export async function runTesseractOcr(
       },
     });
 
-    return {
-      text: result.data.text,
-      confidence: result.data.confidence,
-    };
-  } finally {
-    if (typeof imageSource === "string") {
-      URL.revokeObjectURL(imageSource);
+    const text = result.data.text;
+    const confidence = result.data.confidence;
+
+    if (!text || text.trim().length === 0) {
+      throw new Error("OCR não conseguiu extrair texto da imagem. A imagem pode estar ilegível.");
     }
+
+    return { text, confidence };
+  } finally {
+    URL.revokeObjectURL(imageUrl);
   }
 }
 

@@ -9,6 +9,8 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { useState } from "react";
+import { VerificationProvider } from "./VerificationStore";
+import { Toaster } from "sonner";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -23,6 +25,7 @@ export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
+    <VerificationProvider>
     <div className="flex h-screen overflow-hidden bg-[var(--background)]">
       {/* Mobile overlay */}
       {sidebarOpen && (
@@ -90,6 +93,9 @@ export function Layout() {
               <p className="text-[11px] text-[var(--muted-foreground)]">admin@checadoc.com</p>
             </div>
           </div>
+          <p className="text-[10px] text-[var(--muted-foreground)] text-center mt-3 opacity-60">
+            v1.1.1 &middot; build 2025-02-27
+          </p>
         </div>
       </aside>
 
@@ -116,5 +122,7 @@ export function Layout() {
         </main>
       </div>
     </div>
+    <Toaster position="top-right" />
+    </VerificationProvider>
   );
 }
