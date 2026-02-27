@@ -1,22 +1,5 @@
-import { useState, useRef } from "react";
-import { useNavigate } from "react-router";
-import { useVerifications } from "./VerificationStore";
-import {
-  Upload,
-  FileText,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  Search,
-  MapPin,
-  User,
-  Building,
-  GraduationCap,
-  Mail,
-  Phone,
-  AlertCircle,
-} from "lucide-react";
 import { validateCep, consultCpfSefaz, matchInstitution, runTesseractOcr } from "./utils";
+import type { CpfLogEntry } from "./utils";
 import type { Verification, OcrResult, CepResult, CpfResult } from "./VerificationStore";
 
 export function NewVerification() {
@@ -44,7 +27,16 @@ export function NewVerification() {
   const [ocrProgress, setOcrProgress] = useState<{ status: string; progress: number } | null>(null);
   const [loadingCep, setLoadingCep] = useState(false);
   const [loadingCpf, setLoadingCpf] = useState(false);
+  const [cpfLogs, setCpfLogs] = useState<CpfLogEntry[]>([]);
+  const cpfLogRef = useRef<HTMLDivElement>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // Auto-scroll log panel when new entries arrive
+  useEffect(() => {
+    if (cpfLogRef.current) {
+      cpfLogRef.current.scrollTop = cpfLogRef.current.scrollHeight;
+    }
+  }, [cpfLogs]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -140,7 +132,10 @@ export function NewVerification() {
     if (!formData.cpf) return;
     setLoadingCpf(true);
     setCpfResult(null);
-    const result = await consultCpfSefaz(formData.cpf);
+    setCpfLogs([]);
+    const result = await consultCpfSefaz(formData.cpf, (entry) => {
+      setCpfLogs((prev) => [...prev, entry]);
+    });
     setCpfResult(result);
     setLoadingCpf(false);
   };
@@ -226,8 +221,57 @@ export function NewVerification() {
                   {cpfResult.valid ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
                   <span>CPF: {cpfResult.cpf} &mdash; Situação: {cpfResult.situacao}</span>
                 </div>
-                {cpfResult.message && <p className="mt-1 text-[11px] opacity-75">{cpfResult.message}</p>}
+                {cpfResult.message && (
+                  <div className="mt-1.5 space-y-1">
+                    <p className="text-[11px] opacity-75">
+                      {cpfResult.message.includes("(Motivo do fallback:")
+                        ? cpfResult.message.split("(Motivo do fallback:")[0].trim()
+                        : cpfResult.message}
+                    </p>
+                    {cpfResult.message.includes("(Motivo do fallback:") && (
+                      <p className="text-[10px] opacity-50 italic">
+                        {cpfResult.message.match(/\(Motivo do fallback: (.+)\)/)?.[1] || ""}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
+            )}
+            {cpfLogs.length > 0 && (
+              <details className="mt-2 rounded-lg overflow-hidden border border-gray-300" open={loadingCpf || cpfLogs.some(l => l.level === "error" || l.level === "warn")}>
+                <summary className="cursor-pointer px-3 py-2 bg-gray-800 text-gray-300 text-[11px] flex items-center gap-1.5 select-none">
+                  <Terminal className="w-3 h-3" />
+                  <span>Log de consulta CPF</span>
+                  <span className="ml-auto text-gray-500">{cpfLogs.length} {cpfLogs.length === 1 ? "entrada" : "entradas"}</span>
+                  {loadingCpf && <Loader2 className="w-3 h-3 animate-spin ml-1 text-blue-400" />}
+                </summary>
+                <div
+                  ref={cpfLogRef}
+                  className="bg-gray-900 px-3 py-2 max-h-44 overflow-y-auto font-mono text-[10px] leading-relaxed space-y-0.5 scroll-smooth"
+                >
+                  {cpfLogs.map((entry, i) => {
+                    const colors: Record<string, string> = {
+                      info: "text-gray-400",
+                      ok: "text-green-400",
+                      warn: "text-yellow-400",
+                      error: "text-red-400",
+                    };
+                    const icons: Record<string, string> = {
+                      info: "\u25CB",
+                      ok: "\u2713",
+                      warn: "\u26A0",
+                      error: "\u2717",
+                    };
+                    return (
+                      <div key={i} className={`${colors[entry.level]} break-all`}>
+                        <span className="text-gray-600 mr-1.5">{entry.time}</span>
+                        <span className="mr-1">{icons[entry.level]}</span>
+                        {entry.msg}
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
             )}
           </div>
           <div>

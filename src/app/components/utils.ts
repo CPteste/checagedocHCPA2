@@ -50,7 +50,16 @@ function getCpfRegion(cpf: string): string {
 }
 
 // Consulta real de CPF via API publica (BrasilAPI/ReceitaWS com fallback)
-export async function consultCpfSefaz(cpf: string): Promise<{
+export type CpfLogEntry = {
+  time: string;
+  level: "info" | "ok" | "warn" | "error";
+  msg: string;
+};
+
+export async function consultCpfSefaz(
+  cpf: string,
+  onLog?: (entry: CpfLogEntry) => void,
+): Promise<{
   valid: boolean;
   cpf: string;
   situacao: string;
@@ -59,13 +68,23 @@ export async function consultCpfSefaz(cpf: string): Promise<{
   nome?: string;
   dataConsulta?: string;
 }> {
+  const log = (level: CpfLogEntry["level"], msg: string) => {
+    const time = new Date().toLocaleTimeString("pt-BR", { hour12: false });
+    console.log(`[CPF][${level}] ${msg}`);
+    onLog?.({ time, level, msg });
+  };
+
   const cleanDigits = cpf.replace(/\D/g, "");
   const cleanCpf = formatCpf(cleanDigits);
   const regiao = getCpfRegion(cleanDigits);
   const dataConsulta = new Date().toLocaleString("pt-BR");
 
+  log("info", `Iniciando verificação do CPF ${cleanCpf}`);
+
   // Step 1: Validacao algoritmica (digitos verificadores)
+  log("info", "Passo 1 — Validação algorítmica dos dígitos verificadores...");
   if (!validateCpfAlgorithm(cpf)) {
+    log("error", "CPF INVÁLIDO — dígitos verificadores não conferem");
     return {
       valid: false,
       cpf: cleanCpf,
@@ -75,48 +94,74 @@ export async function consultCpfSefaz(cpf: string): Promise<{
       dataConsulta,
     };
   }
+  log("ok", `Dígitos verificadores OK. Região fiscal: ${regiao}`);
 
   // Step 2: Tentar consulta real via backend proxy (evita CORS)
+  let proxyFailReason = "";
+  const proxyUrl = `${BACKEND_URL}/functions/v1/make-server-a86ed2e4/cpf/${cleanDigits}`;
+  log("info", `Passo 2 — Consultando ReceitaWS via proxy...`);
+  log("info", `URL: ${proxyUrl}`);
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
 
-    const response = await fetch(
-      `${BACKEND_URL}/functions/v1/make-server-a86ed2e4/cpf/${cleanDigits}`,
-      {
-        signal: controller.signal,
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${ANON_KEY}`,
-        },
-      }
-    );
+    const t0 = Date.now();
+    const response = await fetch(proxyUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${ANON_KEY}`,
+      },
+    });
     clearTimeout(timeout);
+    const elapsed = Date.now() - t0;
 
-    if (response.ok) {
-      const data = await response.json();
+    log("info", `Resposta recebida em ${elapsed}ms — HTTP ${response.status}`);
 
-      if (data.status === 0) {
-        return {
-          valid: data.situacao === "Regular",
-          cpf: cleanCpf,
-          situacao: data.situacao || "Regular",
-          nome: data.nome || undefined,
-          message: data.situacao === "Regular"
-            ? `CPF consultado com sucesso na Receita Federal. Contribuinte: ${data.nome || "N/D"}`
-            : `CPF com situacao "${data.situacao}" na Receita Federal. ${data.message || ""}`,
-          regiao,
-          dataConsulta,
-        };
-      } else if (data.message) {
-        console.warn("[CPF] ReceitaWS via proxy:", data.message);
-      }
+    let data: any;
+    try {
+      data = await response.json();
+      log("info", `Body: ${JSON.stringify(data).slice(0, 300)}`);
+    } catch (parseErr) {
+      proxyFailReason = `Resposta não é JSON válido (HTTP ${response.status})`;
+      log("error", proxyFailReason);
+    }
+
+    if (data && !response.ok) {
+      proxyFailReason = `Proxy HTTP ${response.status}: ${data.error || data.message || JSON.stringify(data)}`;
+      log("warn", proxyFailReason);
+    } else if (data?.situacao) {
+      log("ok", `ReceitaWS retornou situação: "${data.situacao}" | Nome: ${data.nome || "N/D"}`);
+      return {
+        valid: data.situacao === "Regular",
+        cpf: cleanCpf,
+        situacao: data.situacao,
+        nome: data.nome || undefined,
+        message: data.situacao === "Regular"
+          ? `CPF consultado com sucesso na Receita Federal. Contribuinte: ${data.nome || "N/D"}`
+          : `CPF com situacao "${data.situacao}" na Receita Federal. ${data.message || ""}`,
+        regiao,
+        dataConsulta,
+      };
+    } else if (data?.message) {
+      proxyFailReason = `ReceitaWS: ${data.message} (status: ${data.status ?? "N/A"})`;
+      log("warn", proxyFailReason);
+    } else if (data) {
+      proxyFailReason = `Resposta inesperada: ${JSON.stringify(data).slice(0, 200)}`;
+      log("warn", proxyFailReason);
     }
   } catch (err) {
-    console.warn("[CPF] Backend proxy indisponivel, usando validacao local:", err);
+    proxyFailReason = err instanceof Error
+      ? `${err.name}: ${err.message}`
+      : String(err);
+    log("error", `Proxy falhou — ${proxyFailReason}`);
   }
 
   // Step 3: Fallback - validacao algoritmica aprovada + info regional
+  log("warn", `Passo 3 — Fallback para validação local (proxy indisponível)`);
+  log("info", `Resultado: CPF válido algoritmicamente, região ${regiao}`);
+
   return {
     valid: true,
     cpf: cleanCpf,

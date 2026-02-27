@@ -94,7 +94,7 @@ export function Layout() {
             </div>
           </div>
           <p className="text-[10px] text-[var(--muted-foreground)] text-center mt-3 opacity-60">
-            v1.2.0 &middot; build 2025-02-27
+            v1.3.0 &middot; build 2025-02-27
           </p>
         </div>
       </aside>
