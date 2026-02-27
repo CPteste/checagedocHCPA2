@@ -380,6 +380,18 @@ export function NewVerification() {
           </div>
         )}
 
+        {documentFile && !documentPreview && (
+          <div className="border border-[var(--border)] rounded-lg p-4 flex items-center gap-3 bg-[var(--accent)]/30">
+            <FileText className="w-8 h-8 text-[var(--primary)]" />
+            <div>
+              <p className="text-[13px]">{documentFile.name}</p>
+              <p className="text-[11px] text-[var(--muted-foreground)]">
+                PDF selecionado — a primeira página será convertida em imagem para OCR
+              </p>
+            </div>
+          </div>
+        )}
+
         {documentFile && (
           <div className="space-y-3">
             <div className="flex items-center gap-3">
@@ -442,9 +454,9 @@ export function NewVerification() {
                 <div className="text-[12px] text-yellow-700 space-y-1">
                   <p>O motor OCR (Tesseract.js) não conseguiu processar o documento. Possíveis causas:</p>
                   <ul className="list-disc list-inside ml-2 space-y-0.5">
-                    <li>O arquivo é um PDF (use uma imagem JPG ou PNG)</li>
                     <li>A imagem está muito escura ou com baixa resolução</li>
                     <li>Erro ao carregar o modelo de idioma</li>
+                    <li>O arquivo pode estar corrompido ou protegido</li>
                   </ul>
                   {ocrResult.errorDetail && (
                     <div className="mt-3 p-2 bg-yellow-100 rounded border border-yellow-300">

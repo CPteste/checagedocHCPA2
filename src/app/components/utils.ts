@@ -241,12 +241,45 @@ export async function runTesseractOcr(
   file: File,
   onProgress?: (status: string, progress: number) => void
 ): Promise<{ text: string; confidence: number }> {
-  // Only accept images
-  if (!file.type.startsWith("image/")) {
-    throw new Error("Apenas imagens (JPG, PNG) são suportadas pelo OCR. Converta o PDF em imagem primeiro.");
-  }
+  let imageUrl: string;
+  let needsCleanup = true;
 
-  const imageUrl = URL.createObjectURL(file);
+  // If file is a PDF, convert first page to image using pdfjs-dist
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    onProgress?.("Convertendo PDF em imagem...", 0);
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      
+      // Set worker source from CDN
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const page = await pdf.getPage(1);
+
+      // Render at 2x scale for better OCR accuracy
+      const scale = 2;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d")!;
+      
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      
+      imageUrl = canvas.toDataURL("image/png");
+      onProgress?.("PDF convertido! Iniciando OCR...", 0.1);
+    } catch (pdfError) {
+      console.error("[OCR] Erro ao converter PDF:", pdfError);
+      throw new Error(
+        `Erro ao converter PDF em imagem: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}. Tente converter manualmente para JPG/PNG.`
+      );
+    }
+  } else if (file.type.startsWith("image/")) {
+    imageUrl = URL.createObjectURL(file);
+  } else {
+    throw new Error("Formato não suportado. Envie uma imagem (JPG, PNG) ou PDF.");
+  }
 
   try {
     onProgress?.("Carregando motor OCR...", 0);
@@ -279,7 +312,10 @@ export async function runTesseractOcr(
 
     return { text, confidence };
   } finally {
-    URL.revokeObjectURL(imageUrl);
+    // Only revoke blob URLs, not data URLs
+    if (imageUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(imageUrl);
+    }
   }
 }
 
