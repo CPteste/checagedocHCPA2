@@ -77,43 +77,23 @@ export function NewVerification() {
       let confidence = 0;
 
       try {
-        // Tesseract.js v7 - real OCR (works in production, may fallback in sandbox)
+        // Tesseract.js v7 - real OCR
         const result = await runTesseractOcr(documentFile, (status, progress) => {
           setOcrProgress({ status, progress });
         });
         text = result.text;
         confidence = result.confidence;
       } catch (tesseractError) {
-        console.warn("Tesseract.js indisponível, usando fallback:", tesseractError);
-        // Fallback: generate placeholder text if Tesseract fails to load
-        setOcrProgress({ status: "Processando...", progress: 0 });
-        await new Promise((r) => setTimeout(r, 800));
-        setOcrProgress({ status: "Processando...", progress: 0.5 });
-        await new Promise((r) => setTimeout(r, 800));
-        setOcrProgress({ status: "Processando...", progress: 1 });
-
-        const institutionName = formData.instituicao || "Instituição não identificada";
-        const studentName = formData.nome || "Nome não identificado";
-        const courseName = formData.curso || "Curso não identificado";
-
-        text = [
-          "COMPROVANTE DE MATRÍCULA",
-          "",
-          institutionName.toUpperCase(),
-          "Pró-Reitoria de Graduação",
-          "",
-          `Declaramos que ${studentName}, portador(a) do CPF ${formData.cpf || "---"},`,
-          `encontra-se regularmente matriculado(a) no curso de ${courseName},`,
-          `no período letivo de 2026/1.`,
-          "",
-          "Situação: ATIVO",
-          `Data de emissão: ${new Date().toLocaleDateString("pt-BR")}`,
-          "",
-          "Este documento é válido como comprovante de vínculo acadêmico.",
-          "",
-          `[Fallback - arquivo: ${documentFile.name}]`,
-        ].join("\n");
-        confidence = 82 + Math.random() * 12;
+        console.error("Tesseract.js falhou:", tesseractError);
+        setOcrResult({
+          text: "",
+          confidence: 0,
+          institutionMatch: false,
+          institutionFound: undefined,
+        });
+        setLoadingOcr(false);
+        setOcrProgress(null);
+        return;
       }
 
       const institutionResult = matchInstitution(text, formData.instituicao);
@@ -447,6 +427,25 @@ export function NewVerification() {
 
         {ocrResult && (
           <div className="space-y-3">
+            {ocrResult.confidence === 0 && !ocrResult.text ? (
+              <div className="p-4 rounded-lg border bg-yellow-50 border-yellow-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertCircle className="w-5 h-5 text-yellow-600" />
+                  <span className="text-[14px] text-yellow-800">
+                    Falha no processamento OCR
+                  </span>
+                </div>
+                <div className="text-[12px] text-yellow-700 space-y-1">
+                  <p>O motor OCR (Tesseract.js) não conseguiu processar o documento. Possíveis causas:</p>
+                  <ul className="list-disc list-inside ml-2 space-y-0.5">
+                    <li>O arquivo é um PDF (use uma imagem JPG ou PNG)</li>
+                    <li>A imagem está muito escura ou com baixa resolução</li>
+                    <li>Erro ao carregar o modelo de idioma</li>
+                  </ul>
+                  <p className="mt-2">Tente novamente com uma <strong>imagem nítida</strong> do comprovante.</p>
+                </div>
+              </div>
+            ) : (
             <div className={`p-4 rounded-lg border ${ocrResult.institutionMatch ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
               <div className="flex items-center gap-2 mb-2">
                 {ocrResult.institutionMatch ? (
@@ -466,6 +465,7 @@ export function NewVerification() {
                 <p><strong>Confiança do OCR:</strong> {ocrResult.confidence.toFixed(1)}%</p>
               </div>
             </div>
+            )}
 
             <details className="bg-[var(--accent)] rounded-lg p-3">
               <summary className="cursor-pointer text-[13px] text-[var(--muted-foreground)]">

@@ -1,4 +1,9 @@
 // ========== CPF Validation ==========
+import { projectId, publicAnonKey } from "/utils/supabase/info";
+
+const BACKEND_URL = import.meta.env.VITE_SUPABASE_URL || `https://${projectId}.supabase.co`;
+const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || publicAnonKey;
+
 export function formatCpf(cpf: string): string {
   const digits = cpf.replace(/\D/g, "");
   return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
@@ -71,16 +76,19 @@ export async function consultCpfSefaz(cpf: string): Promise<{
     };
   }
 
-  // Step 2: Tentar consulta real via ReceitaWS (API gratuita, limite de 3/min)
+  // Step 2: Tentar consulta real via backend proxy (evita CORS)
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const timeout = setTimeout(() => controller.abort(), 12000);
 
     const response = await fetch(
-      `https://www.receitaws.com.br/v1/cpf/${cleanDigits}`,
+      `${BACKEND_URL}/functions/v1/make-server-a86ed2e4/cpf/${cleanDigits}`,
       {
         signal: controller.signal,
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          Authorization: `Bearer ${ANON_KEY}`,
+        },
       }
     );
     clearTimeout(timeout);
@@ -89,7 +97,6 @@ export async function consultCpfSefaz(cpf: string): Promise<{
       const data = await response.json();
 
       if (data.status === 0) {
-        // CPF found
         return {
           valid: data.situacao === "Regular",
           cpf: cleanCpf,
@@ -102,12 +109,11 @@ export async function consultCpfSefaz(cpf: string): Promise<{
           dataConsulta,
         };
       } else if (data.message) {
-        // API returned an error (rate limit, etc.)
-        console.warn("[CPF] ReceitaWS error:", data.message);
+        console.warn("[CPF] ReceitaWS via proxy:", data.message);
       }
     }
   } catch (err) {
-    console.warn("[CPF] ReceitaWS indisponível, usando validação local:", err);
+    console.warn("[CPF] Backend proxy indisponível, usando validação local:", err);
   }
 
   // Step 3: Fallback - validação algorítmica aprovada + info regional
@@ -180,39 +186,50 @@ export function matchInstitution(ocrText: string, declaredInstitution: string): 
   found: string | null;
   match: boolean;
 } {
-  const ocrLower = ocrText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const declaredLower = declaredInstitution.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (!ocrText || ocrText.trim().length < 10 || !declaredInstitution) {
+    return { found: null, match: false };
+  }
 
-  // Direct match
-  if (ocrLower.includes(declaredLower) || declaredLower.includes(ocrLower)) {
+  const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const ocrNorm = normalize(ocrText);
+  const declaredNorm = normalize(declaredInstitution);
+
+  // Direct match: declared institution name appears in OCR text
+  // Only check if OCR contains the declared name (NOT the reverse)
+  if (declaredNorm.length >= 4 && ocrNorm.includes(declaredNorm)) {
     return { found: declaredInstitution, match: true };
   }
 
-  // Check aliases
+  // Check aliases - both OCR and declared must resolve to the same institution
   for (const [fullName, aliases] of Object.entries(institutionAliases)) {
-    const fullNameNorm = fullName.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const allNames = [fullNameNorm, ...aliases.map(a => a.normalize("NFD").replace(/[\u0300-\u036f]/g, ""))];
+    const fullNameNorm = normalize(fullName);
+    const allNames = [fullNameNorm, ...aliases.map(a => normalize(a))];
 
-    const ocrHasIt = allNames.some((name) => ocrLower.includes(name));
-    const declaredHasIt = allNames.some((name) => declaredLower.includes(name));
+    const ocrHasIt = allNames.some((name) => ocrNorm.includes(name));
+    const declaredHasIt = allNames.some((name) => declaredNorm.includes(name) || name.includes(declaredNorm));
 
     if (ocrHasIt && declaredHasIt) {
       return { found: fullName, match: true };
     }
 
     if (ocrHasIt) {
+      // Found an institution in the document, but it doesn't match what was declared
       return { found: fullName, match: false };
     }
   }
 
-  // Try to extract institution name from OCR (heuristic)
-  const keywords = ["universidade", "faculdade", "instituto", "centro universitario", "escola superior"];
+  // Heuristic: try to extract any institution name from OCR text
+  const keywords = ["universidade", "faculdade", "instituto", "centro universitario", "escola superior", "college", "university"];
   for (const kw of keywords) {
-    const idx = ocrLower.indexOf(kw);
+    const idx = ocrNorm.indexOf(kw);
     if (idx !== -1) {
-      const endIdx = ocrLower.indexOf("\n", idx);
-      const found = ocrText.substring(idx, endIdx === -1 ? idx + 80 : endIdx).trim();
-      return { found, match: false };
+      // Extract the line containing the keyword
+      const lineStart = ocrNorm.lastIndexOf("\n", idx) + 1;
+      const lineEnd = ocrNorm.indexOf("\n", idx);
+      const foundLine = ocrText.substring(lineStart, lineEnd === -1 ? Math.min(idx + 100, ocrText.length) : lineEnd).trim();
+      if (foundLine.length > 3) {
+        return { found: foundLine, match: false };
+      }
     }
   }
 
