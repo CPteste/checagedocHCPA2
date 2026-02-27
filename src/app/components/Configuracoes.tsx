@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { Settings, Globe, Database, FileText, AlertTriangle, CheckCircle2, ExternalLink, Shield, Loader2, CloudOff, Cloud, RefreshCw } from "lucide-react";
+import { Settings, Globe, Database, FileText, AlertTriangle, CheckCircle2, ExternalLink, Shield, Loader2, CloudOff, Cloud, RefreshCw, Trash2 } from "lucide-react";
 import { useVerifications } from "./VerificationStore";
 import { kvGet, kvSet } from "./supabaseClient";
 import { projectId } from "/utils/supabase/info";
 import { toast } from "sonner";
 
 export function Configuracoes() {
-  const { verifications, loading, syncError } = useVerifications();
+  const { verifications, loading, syncError, clearAllVerifications } = useVerifications();
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   const testConnection = async () => {
     setTesting(true);
@@ -31,6 +32,15 @@ export function Configuracoes() {
     } finally {
       setTesting(false);
     }
+  };
+
+  const handleClearAll = async () => {
+    if (!window.confirm(
+      `Tem certeza que deseja excluir todas as ${verifications.length} verificações?\n\nEsta ação é irreversível e removerá todos os dados do banco de dados.`
+    )) return;
+    setClearing(true);
+    await clearAllVerifications();
+    setClearing(false);
   };
 
   return (
@@ -97,6 +107,16 @@ export function Configuracoes() {
             <ExternalLink className="w-4 h-4" />
             Abrir Dashboard
           </a>
+          {verifications.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              disabled={clearing}
+              className="px-4 py-2.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 text-[13px] flex items-center gap-2"
+            >
+              {clearing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+              Limpar Todas ({verifications.length})
+            </button>
+          )}
         </div>
 
         {testResult && (

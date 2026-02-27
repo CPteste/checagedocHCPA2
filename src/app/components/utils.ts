@@ -49,13 +49,52 @@ function getCpfRegion(cpf: string): string {
   return regions[regionDigit] || "Desconhecida";
 }
 
-// Consulta real de CPF via API publica (BrasilAPI/ReceitaWS com fallback)
+// ========== CPF Log Types ==========
 export type CpfLogEntry = {
   time: string;
   level: "info" | "ok" | "warn" | "error";
   msg: string;
 };
 
+// Helper: tenta fetch em uma URL com timeout e retorna parsed JSON ou null
+async function tryProxyFetch(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  log: (level: CpfLogEntry["level"], msg: string) => void,
+  label: string,
+): Promise<{ data: any; status: number } | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const t0 = Date.now();
+
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "application/json", ...headers },
+    });
+    clearTimeout(timeout);
+    const elapsed = Date.now() - t0;
+    log("info", `${label}: resposta em ${elapsed}ms — HTTP ${response.status}`);
+
+    let data: any;
+    try {
+      data = await response.json();
+      log("info", `${label} body: ${JSON.stringify(data).slice(0, 300)}`);
+    } catch {
+      log("error", `${label}: resposta não é JSON válido (HTTP ${response.status})`);
+      return null;
+    }
+
+    return { data, status: response.status };
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    log("error", `${label} falhou — ${msg}`);
+    return null;
+  }
+}
+
+// Consulta real de CPF (Vercel API -> Supabase proxy -> fallback local)
 export async function consultCpfSefaz(
   cpf: string,
   onLog?: (entry: CpfLogEntry) => void,
@@ -68,6 +107,7 @@ export async function consultCpfSefaz(
   nome?: string;
   dataConsulta?: string;
 }> {
+  const VERSION = "v1.5.0";
   const log = (level: CpfLogEntry["level"], msg: string) => {
     const time = new Date().toLocaleTimeString("pt-BR", { hour12: false });
     console.log(`[CPF][${level}] ${msg}`);
@@ -79,9 +119,9 @@ export async function consultCpfSefaz(
   const regiao = getCpfRegion(cleanDigits);
   const dataConsulta = new Date().toLocaleString("pt-BR");
 
-  log("info", `Iniciando verificação do CPF ${cleanCpf}`);
+  log("info", `ChecaDoc ${VERSION} — Iniciando verificação do CPF ${cleanCpf}`);
 
-  // Step 1: Validacao algoritmica (digitos verificadores)
+  // ── Passo 1: Validação algorítmica ──
   log("info", "Passo 1 — Validação algorítmica dos dígitos verificadores...");
   if (!validateCpfAlgorithm(cpf)) {
     log("error", "CPF INVÁLIDO — dígitos verificadores não conferem");
@@ -96,77 +136,73 @@ export async function consultCpfSefaz(
   }
   log("ok", `Dígitos verificadores OK. Região fiscal: ${regiao}`);
 
-  // Step 2: Tentar consulta real via backend proxy (evita CORS)
-  let proxyFailReason = "";
-  const proxyUrl = `${BACKEND_URL}/functions/v1/make-server-a86ed2e4/cpf/${cleanDigits}`;
-  log("info", `Passo 2 — Consultando ReceitaWS via proxy...`);
-  log("info", `URL: ${proxyUrl}`);
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-
-    const t0 = Date.now();
-    const response = await fetch(proxyUrl, {
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${ANON_KEY}`,
-      },
-    });
-    clearTimeout(timeout);
-    const elapsed = Date.now() - t0;
-
-    log("info", `Resposta recebida em ${elapsed}ms — HTTP ${response.status}`);
-
-    let data: any;
-    try {
-      data = await response.json();
-      log("info", `Body: ${JSON.stringify(data).slice(0, 300)}`);
-    } catch (parseErr) {
-      proxyFailReason = `Resposta não é JSON válido (HTTP ${response.status})`;
-      log("error", proxyFailReason);
-    }
-
-    if (data && !response.ok) {
-      proxyFailReason = `Proxy HTTP ${response.status}: ${data.error || data.message || JSON.stringify(data)}`;
-      log("warn", proxyFailReason);
-    } else if (data?.situacao) {
-      log("ok", `ReceitaWS retornou situação: "${data.situacao}" | Nome: ${data.nome || "N/D"}`);
+  // Helper para interpretar resposta bem-sucedida de qualquer proxy
+  const parseSuccess = (data: any, source: string) => {
+    if (data?.situacao) {
+      const nome = data.nome || undefined;
+      log("ok", `${source} retornou situação: "${data.situacao}" | Nome: ${nome || "N/D"}`);
       return {
         valid: data.situacao === "Regular",
         cpf: cleanCpf,
         situacao: data.situacao,
-        nome: data.nome || undefined,
+        nome,
         message: data.situacao === "Regular"
-          ? `CPF consultado com sucesso na Receita Federal. Contribuinte: ${data.nome || "N/D"}`
-          : `CPF com situacao "${data.situacao}" na Receita Federal. ${data.message || ""}`,
+          ? `CPF consultado com sucesso na Receita Federal (${source}). Contribuinte: ${nome || "N/D"}`
+          : `CPF com situação "${data.situacao}" na Receita Federal. ${data.message || ""}`,
         regiao,
         dataConsulta,
       };
-    } else if (data?.message) {
-      proxyFailReason = `ReceitaWS: ${data.message} (status: ${data.status ?? "N/A"})`;
-      log("warn", proxyFailReason);
-    } else if (data) {
-      proxyFailReason = `Resposta inesperada: ${JSON.stringify(data).slice(0, 200)}`;
-      log("warn", proxyFailReason);
     }
-  } catch (err) {
-    proxyFailReason = err instanceof Error
-      ? `${err.name}: ${err.message}`
-      : String(err);
-    log("error", `Proxy falhou — ${proxyFailReason}`);
+    return null;
+  };
+
+  // ── Passo 2: Vercel Serverless Function (proxy primário) ──
+  const vercelUrl = `/api/cpf/${cleanDigits}`;
+  log("info", `Passo 2 — Consultando via Vercel Serverless Function...`);
+  log("info", `URL: ${vercelUrl}`);
+
+  const vercelResult = await tryProxyFetch(vercelUrl, {}, 15000, log, "Vercel API");
+
+  if (vercelResult) {
+    const { data, status } = vercelResult;
+    if (status >= 200 && status < 300) {
+      const parsed = parseSuccess(data, "Vercel→ReceitaWS");
+      if (parsed) return parsed;
+    }
+    log("warn", `Vercel API erro HTTP ${status}: ${data?.error || data?.message || JSON.stringify(data)}`);
   }
 
-  // Step 3: Fallback - validacao algoritmica aprovada + info regional
-  log("warn", `Passo 3 — Fallback para validação local (proxy indisponível)`);
+  // ── Passo 3: Supabase Edge Function (proxy secundário) ──
+  const supabaseUrl = `${BACKEND_URL}/functions/v1/make-server-a86ed2e4/cpf/${cleanDigits}`;
+  log("info", `Passo 3 — Tentando Supabase Edge Function como fallback...`);
+  log("info", `URL: ${supabaseUrl}`);
+
+  const supabaseResult = await tryProxyFetch(
+    supabaseUrl,
+    { Authorization: `Bearer ${ANON_KEY}` },
+    12000,
+    log,
+    "Supabase proxy",
+  );
+
+  if (supabaseResult) {
+    const { data, status } = supabaseResult;
+    if (status >= 200 && status < 300) {
+      const parsed = parseSuccess(data, "Supabase→ReceitaWS");
+      if (parsed) return parsed;
+    }
+    log("warn", `Supabase proxy HTTP ${status}: ${data?.error || data?.message || JSON.stringify(data)}`);
+  }
+
+  // ── Passo 4: Fallback local ──
+  log("warn", "Passo 4 — Nenhum proxy disponível, usando validação local");
   log("info", `Resultado: CPF válido algoritmicamente, região ${regiao}`);
 
   return {
     valid: true,
     cpf: cleanCpf,
-    situacao: "Regular (validacao local)",
-    message: `CPF valido algoritmicamente. Regiao fiscal: ${regiao}. A consulta online a Receita Federal nao esta disponivel no momento - usando validacao matematica dos digitos verificadores.`,
+    situacao: "Regular (validação local)",
+    message: `CPF válido algoritmicamente. Região fiscal: ${regiao}. Nenhum proxy de consulta à Receita Federal respondeu — usando validação matemática dos dígitos verificadores.`,
     regiao,
     dataConsulta,
   };
@@ -248,143 +284,126 @@ export function matchInstitution(ocrText: string, declaredInstitution: string): 
   // Check aliases - both OCR and declared must resolve to the same institution
   for (const [fullName, aliases] of Object.entries(institutionAliases)) {
     const fullNameNorm = normalize(fullName);
-    const allNames = [fullNameNorm, ...aliases.map(a => normalize(a))];
+    const allNames = [fullNameNorm, ...aliases.map(normalize)];
 
-    const ocrHasIt = allNames.some((name) => ocrNorm.includes(name));
-    const declaredHasIt = allNames.some((name) => declaredNorm.includes(name) || name.includes(declaredNorm));
+    const declaredMatches = allNames.some(
+      (name) => declaredNorm.includes(name) || name.includes(declaredNorm)
+    );
+    if (!declaredMatches) continue;
 
-    if (ocrHasIt && declaredHasIt) {
+    const ocrMatches = allNames.some((name) => ocrNorm.includes(name));
+    if (ocrMatches) {
       return { found: fullName, match: true };
-    }
-
-    if (ocrHasIt) {
-      return { found: fullName, match: false };
     }
   }
 
-  // Heuristic: try to extract any institution name from OCR text
-  const keywords = ["universidade", "faculdade", "instituto", "centro universitario", "escola superior", "college", "university"];
-  for (const kw of keywords) {
-    const idx = ocrNorm.indexOf(kw);
-    if (idx !== -1) {
-      const lineStart = ocrNorm.lastIndexOf("\n", idx) + 1;
-      const lineEnd = ocrNorm.indexOf("\n", idx);
-      const foundLine = ocrText.substring(lineStart, lineEnd === -1 ? Math.min(idx + 100, ocrText.length) : lineEnd).trim();
-      if (foundLine.length > 3) {
-        return { found: foundLine, match: false };
-      }
+  // Word-based partial matching (at least 2 significant words must match)
+  const significantWords = declaredNorm
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !["de", "do", "da", "dos", "das", "e"].includes(w));
+
+  if (significantWords.length >= 2) {
+    const matchCount = significantWords.filter((word) => ocrNorm.includes(word)).length;
+    if (matchCount >= Math.ceil(significantWords.length * 0.6)) {
+      return { found: declaredInstitution, match: true };
     }
   }
 
   return { found: null, match: false };
 }
 
-// ========== OCR with Tesseract.js (supports images + PDF) ==========
-async function convertPdfToImage(
+// ========== OCR via Tesseract.js ==========
+export async function runTesseractOcr(
   file: File,
-  onProgress?: (status: string, progress: number) => void
-): Promise<string> {
-  onProgress?.("Convertendo PDF em imagem...", 0);
+  onProgress?: (status: string, progress: number) => void,
+): Promise<{ text: string; confidence: number }> {
+  let imageFile = file;
 
+  // Se for PDF, converter primeira pagina em imagem
+  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+    onProgress?.("Convertendo PDF para imagem...", 0.05);
+    imageFile = await convertPdfToImage(file);
+    onProgress?.("PDF convertido, iniciando OCR...", 0.1);
+  }
+
+  const Tesseract = await import("tesseract.js");
+  const worker = await Tesseract.createWorker("por", undefined, {
+    logger: (m: any) => {
+      if (m.status && typeof m.progress === "number") {
+        const statusMap: Record<string, string> = {
+          "loading tesseract core": "Carregando motor OCR...",
+          "initializing tesseract": "Inicializando Tesseract...",
+          "loading language traineddata": "Carregando idioma português...",
+          "initializing api": "Preparando API...",
+          "recognizing text": "Reconhecendo texto...",
+        };
+        onProgress?.(statusMap[m.status] || m.status, m.progress);
+      }
+    },
+  });
+
+  const {
+    data: { text, confidence },
+  } = await worker.recognize(imageFile);
+  await worker.terminate();
+
+  return { text: text.trim(), confidence };
+}
+
+// ========== PDF to Image conversion ==========
+async function convertPdfToImage(file: File): Promise<File> {
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Use unpkg.com which directly mirrors npm packages (unlike cdnjs which may lag behind)
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  // Configurar worker do PDF.js via CDN
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const page = await pdf.getPage(1);
 
-  // Render at 2x scale for better OCR accuracy
   const scale = 2;
   const viewport = page.getViewport({ scale });
+
   const canvas = document.createElement("canvas");
   canvas.width = viewport.width;
   canvas.height = viewport.height;
-  const ctx = canvas.getContext("2d")!;
+  const context = canvas.getContext("2d")!;
 
-  await page.render({ canvasContext: ctx, viewport }).promise;
+  await page.render({ canvasContext: context, viewport }).promise;
 
-  onProgress?.("PDF convertido! Iniciando OCR...", 0.1);
-  return canvas.toDataURL("image/png");
-}
-
-export async function runTesseractOcr(
-  file: File,
-  onProgress?: (status: string, progress: number) => void
-): Promise<{ text: string; confidence: number }> {
-  let imageUrl: string;
-
-  // If file is a PDF, convert first page to image using pdfjs-dist
-  if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-    try {
-      imageUrl = await convertPdfToImage(file, onProgress);
-    } catch (pdfError) {
-      console.error("[OCR] Erro ao converter PDF:", pdfError);
-      throw new Error(
-        `Erro ao converter PDF em imagem: ${pdfError instanceof Error ? pdfError.message : String(pdfError)}. Tente converter manualmente para JPG/PNG.`
-      );
-    }
-  } else if (file.type.startsWith("image/")) {
-    imageUrl = URL.createObjectURL(file);
-  } else {
-    throw new Error("Formato nao suportado. Envie uma imagem (JPG, PNG) ou PDF.");
-  }
-
-  try {
-    onProgress?.("Carregando motor OCR...", 0);
-
-    const Tesseract = await import("tesseract.js");
-
-    const result = await Tesseract.recognize(imageUrl, "por", {
-      logger: (m: { status: string; progress: number }) => {
-        const statusMap: Record<string, string> = {
-          "loading tesseract core": "Carregando Tesseract...",
-          "initializing tesseract": "Inicializando...",
-          "loading language traineddata": "Baixando modelo portugues...",
-          "loaded language traineddata": "Modelo carregado!",
-          "initializing api": "Preparando API...",
-          "recognizing text": "Reconhecendo texto...",
-        };
-        const label = statusMap[m.status] || m.status;
-        onProgress?.(label, m.progress);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Falha ao converter canvas para blob"));
+          return;
+        }
+        const imageFile = new File([blob], "pdf-page-1.png", { type: "image/png" });
+        resolve(imageFile);
       },
-    });
-
-    const text = result.data.text;
-    const confidence = result.data.confidence;
-
-    if (!text || text.trim().length === 0) {
-      throw new Error("OCR nao conseguiu extrair texto da imagem. A imagem pode estar ilegivel.");
-    }
-
-    return { text, confidence };
-  } finally {
-    // Only revoke blob URLs, not data URLs from canvas
-    if (imageUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(imageUrl);
-    }
-  }
+      "image/png",
+      1.0,
+    );
+  });
 }
 
 // ========== Status helpers ==========
 export function getStatusLabel(status: string): string {
-  const map: Record<string, string> = {
+  const labels: Record<string, string> = {
     pendente: "Pendente",
-    em_analise: "Em Analise",
+    em_analise: "Em Análise",
     aprovado: "Aprovado",
     reprovado: "Reprovado",
   };
-  return map[status] || status;
+  return labels[status] || status;
 }
 
 export function getStatusColor(status: string): string {
-  const map: Record<string, string> = {
+  const colors: Record<string, string> = {
     pendente: "bg-yellow-100 text-yellow-800",
     em_analise: "bg-blue-100 text-blue-800",
     aprovado: "bg-green-100 text-green-800",
     reprovado: "bg-red-100 text-red-800",
   };
-  return map[status] || "bg-gray-100 text-gray-800";
+  return colors[status] || "bg-gray-100 text-gray-800";
 }

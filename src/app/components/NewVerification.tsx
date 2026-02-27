@@ -240,19 +240,14 @@ export function NewVerification() {
                   {cpfResult.valid ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
                   <span>CPF: {cpfResult.cpf} &mdash; Situação: {cpfResult.situacao}</span>
                 </div>
+                {cpfResult.nome && (
+                  <p className="mt-1.5 text-[12px] font-medium">
+                    <User className="w-3 h-3 inline mr-1" />
+                    Contribuinte: {cpfResult.nome}
+                  </p>
+                )}
                 {cpfResult.message && (
-                  <div className="mt-1.5 space-y-1">
-                    <p className="text-[11px] opacity-75">
-                      {cpfResult.message.includes("(Motivo do fallback:")
-                        ? cpfResult.message.split("(Motivo do fallback:")[0].trim()
-                        : cpfResult.message}
-                    </p>
-                    {cpfResult.message.includes("(Motivo do fallback:") && (
-                      <p className="text-[10px] opacity-50 italic">
-                        {cpfResult.message.match(/\(Motivo do fallback: (.+)\)/)?.[1] || ""}
-                      </p>
-                    )}
-                  </div>
+                  <p className="mt-1 text-[11px] opacity-75">{cpfResult.message}</p>
                 )}
               </div>
             )}

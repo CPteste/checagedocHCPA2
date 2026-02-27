@@ -13,12 +13,13 @@ import {
   ShieldCheck,
   Printer,
   Download,
+  Trash2,
 } from "lucide-react";
 
 export function VerificationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getVerification, updateVerification } = useVerifications();
+  const { getVerification, updateVerification, deleteVerification } = useVerifications();
   const v = getVerification(id || "");
 
   if (!v) {
@@ -75,6 +76,9 @@ export function VerificationDetail() {
         ? [
             { key: "CPF", value: v.cpfResult.cpf },
             { key: "Situação", value: v.cpfResult.situacao || "" },
+            ...(v.cpfResult.nome ? [{ key: "Nome (Receita)", value: v.cpfResult.nome }] : []),
+            ...(v.cpfResult.regiao ? [{ key: "Região fiscal", value: v.cpfResult.regiao }] : []),
+            ...(v.cpfResult.dataConsulta ? [{ key: "Data da consulta", value: v.cpfResult.dataConsulta }] : []),
             ...(v.cpfResult.message ? [{ key: "Observação", value: v.cpfResult.message }] : []),
           ]
         : [],
@@ -247,6 +251,18 @@ export function VerificationDetail() {
             Reprovar Verificação
           </button>
           <button
+            onClick={() => {
+              if (window.confirm(`Excluir verificação ${v.id}? Esta ação não pode ser desfeita.`)) {
+                deleteVerification(v.id);
+                navigate("/verificacoes");
+              }
+            }}
+            className="px-4 py-2.5 rounded-lg border border-red-300 text-red-600 hover:bg-red-50 text-[14px] flex items-center gap-2"
+          >
+            <Trash2 className="w-4 h-4" />
+            Excluir
+          </button>
+          <button
             onClick={() => navigate("/verificacoes")}
             className="px-4 py-2.5 rounded-lg border border-[var(--border)] hover:bg-[var(--accent)] text-[14px]"
           >
@@ -262,13 +278,13 @@ export function VerificationDetail() {
             <ShieldCheck className="w-10 h-10 mx-auto text-[var(--primary)] mb-2" />
             <h3 className="text-[16px]">Certidão de Situação Cadastral do CPF</h3>
             <p className="text-[12px] text-[var(--muted-foreground)]">
-              Emitida pelo Sistema ChecaDoc &middot; {new Date().toLocaleDateString("pt-BR")}
+              Emitida pelo Sistema ChecaDoc &middot; {v.cpfResult.dataConsulta || new Date().toLocaleDateString("pt-BR")}
             </p>
           </div>
           <div className="border border-[var(--border)] rounded-lg p-4 space-y-2 max-w-md mx-auto">
             <div className="flex justify-between text-[14px]">
               <span className="text-[var(--muted-foreground)]">Nome:</span>
-              <span>{v.formData.nome}</span>
+              <span>{v.cpfResult.nome || v.formData.nome}</span>
             </div>
             <div className="flex justify-between text-[14px]">
               <span className="text-[var(--muted-foreground)]">CPF:</span>
@@ -280,9 +296,15 @@ export function VerificationDetail() {
                 {v.cpfResult.situacao}
               </span>
             </div>
+            {v.cpfResult.regiao && (
+              <div className="flex justify-between text-[14px]">
+                <span className="text-[var(--muted-foreground)]">Região fiscal:</span>
+                <span>{v.cpfResult.regiao}</span>
+              </div>
+            )}
             <div className="flex justify-between text-[14px]">
               <span className="text-[var(--muted-foreground)]">Data:</span>
-              <span>{new Date().toLocaleDateString("pt-BR")}</span>
+              <span>{v.cpfResult.dataConsulta || new Date().toLocaleDateString("pt-BR")}</span>
             </div>
           </div>
           <p className="text-[11px] text-[var(--muted-foreground)] text-center mt-4">
