@@ -29,7 +29,7 @@ export function validateCpfAlgorithm(cpf: string): boolean {
   return true;
 }
 
-// Região fiscal do CPF (baseado no 9º dígito)
+// Regiao fiscal do CPF (baseado no 9 digito)
 function getCpfRegion(cpf: string): string {
   const digits = cpf.replace(/\D/g, "");
   if (digits.length < 10) return "Desconhecida";
@@ -49,7 +49,7 @@ function getCpfRegion(cpf: string): string {
   return regions[regionDigit] || "Desconhecida";
 }
 
-// Consulta real de CPF via API pública (BrasilAPI/ReceitaWS com fallback)
+// Consulta real de CPF via API publica (BrasilAPI/ReceitaWS com fallback)
 export async function consultCpfSefaz(cpf: string): Promise<{
   valid: boolean;
   cpf: string;
@@ -64,13 +64,13 @@ export async function consultCpfSefaz(cpf: string): Promise<{
   const regiao = getCpfRegion(cleanDigits);
   const dataConsulta = new Date().toLocaleString("pt-BR");
 
-  // Step 1: Validação algorítmica (dígitos verificadores)
+  // Step 1: Validacao algoritmica (digitos verificadores)
   if (!validateCpfAlgorithm(cpf)) {
     return {
       valid: false,
       cpf: cleanCpf,
-      situacao: "Inválido",
-      message: "CPF com dígitos verificadores inválidos. Não passa na validação matemática da Receita Federal.",
+      situacao: "Invalido",
+      message: "CPF com digitos verificadores invalidos. Nao passa na validacao matematica da Receita Federal.",
       regiao,
       dataConsulta,
     };
@@ -104,7 +104,7 @@ export async function consultCpfSefaz(cpf: string): Promise<{
           nome: data.nome || undefined,
           message: data.situacao === "Regular"
             ? `CPF consultado com sucesso na Receita Federal. Contribuinte: ${data.nome || "N/D"}`
-            : `CPF com situação "${data.situacao}" na Receita Federal. ${data.message || ""}`,
+            : `CPF com situacao "${data.situacao}" na Receita Federal. ${data.message || ""}`,
           regiao,
           dataConsulta,
         };
@@ -113,15 +113,15 @@ export async function consultCpfSefaz(cpf: string): Promise<{
       }
     }
   } catch (err) {
-    console.warn("[CPF] Backend proxy indisponível, usando validação local:", err);
+    console.warn("[CPF] Backend proxy indisponivel, usando validacao local:", err);
   }
 
-  // Step 3: Fallback - validação algorítmica aprovada + info regional
+  // Step 3: Fallback - validacao algoritmica aprovada + info regional
   return {
     valid: true,
     cpf: cleanCpf,
-    situacao: "Regular (validação local)",
-    message: `CPF válido algoritmicamente. Região fiscal: ${regiao}. A consulta online à Receita Federal não está disponível no momento — usando validação matemática dos dígitos verificadores.`,
+    situacao: "Regular (validacao local)",
+    message: `CPF valido algoritmicamente. Regiao fiscal: ${regiao}. A consulta online a Receita Federal nao esta disponivel no momento - usando validacao matematica dos digitos verificadores.`,
     regiao,
     dataConsulta,
   };
@@ -139,7 +139,7 @@ export async function validateCep(cep: string): Promise<{
 }> {
   const cleanCep = cep.replace(/\D/g, "");
   if (cleanCep.length !== 8) {
-    return { valid: false, error: "CEP deve ter 8 dígitos" };
+    return { valid: false, error: "CEP deve ter 8 digitos" };
   }
 
   try {
@@ -147,7 +147,7 @@ export async function validateCep(cep: string): Promise<{
     const data = await response.json();
 
     if (data.erro) {
-      return { valid: false, error: "CEP não encontrado na base dos Correios" };
+      return { valid: false, error: "CEP nao encontrado na base dos Correios" };
     }
 
     return {
@@ -159,27 +159,27 @@ export async function validateCep(cep: string): Promise<{
       uf: data.uf,
     };
   } catch {
-    return { valid: false, error: "Erro ao consultar ViaCEP. Verifique sua conexão." };
+    return { valid: false, error: "Erro ao consultar ViaCEP. Verifique sua conexao." };
   }
 }
 
 // ========== Institution matching ==========
 const institutionAliases: Record<string, string[]> = {
-  "universidade de são paulo": ["usp", "universidade de sao paulo"],
+  "universidade de sao paulo": ["usp", "universidade de sao paulo"],
   "universidade federal do rio de janeiro": ["ufrj"],
   "universidade estadual de campinas": ["unicamp"],
   "universidade federal de minas gerais": ["ufmg"],
-  "universidade federal do paraná": ["ufpr"],
-  "universidade tecnológica federal do paraná": ["utfpr"],
-  "pontifícia universidade católica": ["puc", "puc-rio", "puc-sp", "puc-mg", "puc-pr"],
+  "universidade federal do parana": ["ufpr"],
+  "universidade tecnologica federal do parana": ["utfpr"],
+  "pontificia universidade catolica": ["puc", "puc-rio", "puc-sp", "puc-mg", "puc-pr"],
   "universidade federal de santa catarina": ["ufsc"],
   "universidade federal do rio grande do sul": ["ufrgs"],
-  "universidade de brasília": ["unb"],
+  "universidade de brasilia": ["unb"],
   "universidade federal da bahia": ["ufba"],
   "universidade federal de pernambuco": ["ufpe"],
-  "universidade federal do ceará": ["ufc"],
+  "universidade federal do ceara": ["ufc"],
   "universidade federal fluminense": ["uff"],
-  "universidade federal de goiás": ["ufg"],
+  "universidade federal de goias": ["ufg"],
 };
 
 export function matchInstitution(ocrText: string, declaredInstitution: string): {
@@ -213,7 +213,6 @@ export function matchInstitution(ocrText: string, declaredInstitution: string): 
     }
 
     if (ocrHasIt) {
-      // Found an institution in the document, but it doesn't match what was declared
       return { found: fullName, match: false };
     }
   }
@@ -223,7 +222,6 @@ export function matchInstitution(ocrText: string, declaredInstitution: string): 
   for (const kw of keywords) {
     const idx = ocrNorm.indexOf(kw);
     if (idx !== -1) {
-      // Extract the line containing the keyword
       const lineStart = ocrNorm.lastIndexOf("\n", idx) + 1;
       const lineEnd = ocrNorm.indexOf("\n", idx);
       const foundLine = ocrText.substring(lineStart, lineEnd === -1 ? Math.min(idx + 100, ocrText.length) : lineEnd).trim();
@@ -236,39 +234,47 @@ export function matchInstitution(ocrText: string, declaredInstitution: string): 
   return { found: null, match: false };
 }
 
-// ========== OCR with Tesseract.js ==========
+// ========== OCR with Tesseract.js (supports images + PDF) ==========
+async function convertPdfToImage(
+  file: File,
+  onProgress?: (status: string, progress: number) => void
+): Promise<string> {
+  onProgress?.("Convertendo PDF em imagem...", 0);
+
+  const pdfjsLib = await import("pdfjs-dist");
+
+  // Use unpkg.com which directly mirrors npm packages (unlike cdnjs which may lag behind)
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+
+  // Render at 2x scale for better OCR accuracy
+  const scale = 2;
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const ctx = canvas.getContext("2d")!;
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  onProgress?.("PDF convertido! Iniciando OCR...", 0.1);
+  return canvas.toDataURL("image/png");
+}
+
 export async function runTesseractOcr(
   file: File,
   onProgress?: (status: string, progress: number) => void
 ): Promise<{ text: string; confidence: number }> {
   let imageUrl: string;
-  let needsCleanup = true;
 
   // If file is a PDF, convert first page to image using pdfjs-dist
   if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
-    onProgress?.("Convertendo PDF em imagem...", 0);
     try {
-      const pdfjsLib = await import("pdfjs-dist");
-      
-      // Set worker source from CDN
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const page = await pdf.getPage(1);
-
-      // Render at 2x scale for better OCR accuracy
-      const scale = 2;
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      const ctx = canvas.getContext("2d")!;
-      
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      
-      imageUrl = canvas.toDataURL("image/png");
-      onProgress?.("PDF convertido! Iniciando OCR...", 0.1);
+      imageUrl = await convertPdfToImage(file, onProgress);
     } catch (pdfError) {
       console.error("[OCR] Erro ao converter PDF:", pdfError);
       throw new Error(
@@ -278,7 +284,7 @@ export async function runTesseractOcr(
   } else if (file.type.startsWith("image/")) {
     imageUrl = URL.createObjectURL(file);
   } else {
-    throw new Error("Formato não suportado. Envie uma imagem (JPG, PNG) ou PDF.");
+    throw new Error("Formato nao suportado. Envie uma imagem (JPG, PNG) ou PDF.");
   }
 
   try {
@@ -286,14 +292,12 @@ export async function runTesseractOcr(
 
     const Tesseract = await import("tesseract.js");
 
-    // Use the convenience recognize() function (available in v5-v7)
-    // It internally creates a worker, runs OCR, and terminates
     const result = await Tesseract.recognize(imageUrl, "por", {
       logger: (m: { status: string; progress: number }) => {
         const statusMap: Record<string, string> = {
           "loading tesseract core": "Carregando Tesseract...",
           "initializing tesseract": "Inicializando...",
-          "loading language traineddata": "Baixando modelo português...",
+          "loading language traineddata": "Baixando modelo portugues...",
           "loaded language traineddata": "Modelo carregado!",
           "initializing api": "Preparando API...",
           "recognizing text": "Reconhecendo texto...",
@@ -307,12 +311,12 @@ export async function runTesseractOcr(
     const confidence = result.data.confidence;
 
     if (!text || text.trim().length === 0) {
-      throw new Error("OCR não conseguiu extrair texto da imagem. A imagem pode estar ilegível.");
+      throw new Error("OCR nao conseguiu extrair texto da imagem. A imagem pode estar ilegivel.");
     }
 
     return { text, confidence };
   } finally {
-    // Only revoke blob URLs, not data URLs
+    // Only revoke blob URLs, not data URLs from canvas
     if (imageUrl.startsWith("blob:")) {
       URL.revokeObjectURL(imageUrl);
     }
@@ -323,7 +327,7 @@ export async function runTesseractOcr(
 export function getStatusLabel(status: string): string {
   const map: Record<string, string> = {
     pendente: "Pendente",
-    em_analise: "Em Análise",
+    em_analise: "Em Analise",
     aprovado: "Aprovado",
     reprovado: "Reprovado",
   };
