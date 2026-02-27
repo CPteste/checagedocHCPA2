@@ -1,6 +1,25 @@
+import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { validateCep, consultCpfSefaz, matchInstitution, runTesseractOcr } from "./utils";
 import type { CpfLogEntry } from "./utils";
 import type { Verification, OcrResult, CepResult, CpfResult } from "./VerificationStore";
+import { useVerifications } from "./VerificationStore";
+import {
+  Upload,
+  FileText,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Search,
+  MapPin,
+  User,
+  Building,
+  GraduationCap,
+  Mail,
+  Phone,
+  AlertCircle,
+  Terminal,
+} from "lucide-react";
 
 export function NewVerification() {
   const navigate = useNavigate();
